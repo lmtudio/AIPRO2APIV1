@@ -72,7 +72,7 @@ async def parse_sse(response):
     if event:
         yield event
 
-@app.post('/api/chat/completions')
+@app.post('/v1/chat/completions')
 async def chat_completions(request: Request):
     data = await request.json()
     messages = data.get('messages', [])
@@ -181,7 +181,7 @@ async def chat_completions(request: Request):
             }
         }
 
-@app.get("/api/models")
+@app.get("/v1/models")
 async def get_models():
     """Returns a list of available models."""
     return {

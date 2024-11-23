@@ -1,11 +1,23 @@
+import os
 import json
 import random
 import asyncio
 import aiohttp
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, HTTPException, Depends
 from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI()
+security = HTTPBearer()
+APP_SECRET = os.getenv("APP_SECRET")
+
+def verify_app_secret(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    if credentials.credentials != APP_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid APP_SECRET")
+    return credentials.credentials
 
 def generate_random_ip():
     return f"{random.randint(1, 255)}.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(0, 255)}"
@@ -44,20 +56,15 @@ def format_openai_response(content, finish_reason=None):
     }
 
 async def parse_sse(response):
-    """
-    Parses Server-Sent Events from an aiohttp response.
-    """
     event = {}
     async for line in response.content:
         line = line.decode('utf-8').strip()
         if not line:
-            # Empty line indicates end of event
             if event:
                 yield event
                 event = {}
             continue
         if line.startswith(':'):
-            # Comment line, ignore
             continue
         if ':' in line:
             key, value = line.split(':', 1)
@@ -72,8 +79,8 @@ async def parse_sse(response):
     if event:
         yield event
 
-@app.post('/v1/chat/completions')
-async def chat_completions(request: Request):
+@app.post('/api/chat/completions')
+async def chat_completions(request: Request, app_secret: str = Depends(verify_app_secret)):
     data = await request.json()
     messages = data.get('messages', [])
     stream = data.get('stream', False)
@@ -105,7 +112,7 @@ async def chat_completions(request: Request):
         full_response = ""
         while True:
             conversation = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
-            conversation += "\nPlease follow and reply to the user’s recent messages and avoid answers that summarize the conversation history."
+            conversation += "\nPlease follow and reply to the user's recent messages and avoid answers that summarize the conversation history."
             
             payload = {
                 "text": conversation,
@@ -135,7 +142,7 @@ async def chat_completions(request: Request):
                                 if finish_reason == 'length':
                                     messages.append({"role": "assistant", "content": full_response})
                                     messages.append({"role": "user", "content": "Please continue your output and do not repeat the previous content"})
-                                    break  # Continue with the next request
+                                    break
                                 else:
                                     last_content = response_message.get('text', '')
                                     if last_content and last_content != full_response:
@@ -181,9 +188,8 @@ async def chat_completions(request: Request):
             }
         }
 
-@app.get("/v1/models")
+@app.get("/api/models", dependencies=[Depends(verify_app_secret)])
 async def get_models():
-    """Returns a list of available models."""
     return {
         "object": "list",
         "data": [
@@ -205,6 +211,7 @@ async def get_models():
             {"id": "gemini-pro", "name": "gemini-pro"}
         ]
     }
+
 @app.get("/")
 async def root():
     return {"status": "ok"}
